@@ -1,10 +1,12 @@
 #include <map>
+#include <list>
 using namespace std;
 
 class iEvent
 {
 	// 事件基类，用于在进程之间通讯
 public:
+	int m_nType; // 事件类型
 	int m_nLen; // 事件长度，用于网络层会使用到这个参数
 };
 class iListen;
@@ -13,7 +15,7 @@ class iConnect
 	// 连接基类，用于发送事件和接收事件
 public:
 	iListen * m_pListen; // 监听指针
-	virtual iEvent * GetEvt(int &nCount) = 0; // 获取事件列表，输出参数是事件的个数
+	virtual list<iEvent *> GetEvts() = 0; // 获取事件列表，输出参数是事件的个数
 	virtual int SendEvt(iEvent * pEvent) = 0; // 发送事件
 };
 
@@ -21,7 +23,7 @@ class iListen
 {
 	// 监听服务器，用于接收新的连接
 public:
-	virtual iConnect * GetAccept(int &nCount) = 0; // 获取新连接列表
+	virtual list<iConnect *> GetAccepts() = 0; // 获取新连接列表
 };
 
 class iNetworkMgr
@@ -34,6 +36,11 @@ public:
 	virtual bool Release(iListen * pListen) = 0; // 关闭一个监听服务器
 };
 
+enum EventId
+{
+	eAccept = 1,
+};
+
 class iNode
 {
 public:
@@ -42,10 +49,29 @@ public:
 	virtual void Close(iConnect * pConnect) = 0; // 关闭一个连接
 	virtual iListen * Create(int nIp, int nPort) = 0; // 创建一个监听服务器
 	virtual bool Release(iListen * pListen) = 0; // 关闭一个监听服务器
-	virtual bool OnEvt(iConnect * pConn, int nType, iEvent * pEvt) = 0; // 处理事件， 这个事件可能是新连接，连接断开，新消息
+	virtual void OnEvt(iConnect * pConn, int nType, iEvent * pEvt) = 0; // 处理事件， 这个事件可能是新连接，连接断开，新消息
 	void Process(int nTime)
 	{
-		
+		// 遍历所有监听列表, 获取新的连接
+		for (map<int, iListen*>::iterator listenIt = m_mapListen.begin(); listenIt != m_mapListen.end(); listenIt ++)
+		{
+			list<iConnect *> listAccepts = listenIt->second->GetAccepts();
+			// 遍历每个监听里面的新的连接，通知新连接事件，插入连接列表
+			for (list<iConnect *>::iterator connectIt = listAccepts.begin(); connectIt != listAccepts.end(); connectIt ++) 
+			{
+				m_mapConnect[(int)(*connectIt)] = *connectIt;
+				OnEvt((*connectIt), eAccept, NULL);
+			}
+		}
+		// 遍历所有连接，取出所有连接中的消息，处理掉这些消息
+		for (map<int, iConnect*>::iterator itConn = m_mapConnect.begin(); itConn != m_mapConnect.end(); itConn ++ )
+		{
+			list<iEvent *> listEvts = itConn->second->GetEvts();
+			for (list<iEvent *>::iterator itEvt = listEvts.begin(); itEvt != listEvts.end(); itEvt ++)
+			{
+				OnEvt(itConn->second, (*itEvt)->m_nType, *itEvt);
+			}
+		}
 	}
 	map<int, iListen*> m_mapListen; // 监听列表
 	map<int, iConnect*> m_mapConnect; // 连接列表
